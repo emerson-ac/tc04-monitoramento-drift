@@ -13,6 +13,25 @@ def test_alert_rules_use_configured_psi_thresholds() -> None:
     ]
 
 
+def test_stage2_performance_and_drift_alerts() -> None:
+    """Alertas correspondem aos deltas e à fração calculados pela Etapa 2."""
+    metrics = {
+        "auc_drop": 0.03,
+        "recall_drop": 0.05,
+        "share_features_drifted": 0.20,
+    }
+    alerts = evaluate_alerts(metrics)
+    assert [(alert["name"], alert["severity"]) for alert in alerts] == [
+        ("auc_drop", "warning"),
+        ("recall_drop", "warning"),
+        ("share_features_drifted", "warning"),
+    ]
+    severe = evaluate_alerts(
+        {"auc_drop": 0.05, "recall_drop": 0.10, "share_features_drifted": 0.50}
+    )
+    assert all(alert["severity"] == "critical" for alert in severe)
+
+
 def test_alert_rules_ignore_healthy_metrics() -> None:
     """Métricas abaixo dos limites não devem gerar alertas."""
     assert evaluate_alerts({"psi_feature": 0.04, "auc_drop": 0.01}) == []

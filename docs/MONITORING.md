@@ -88,6 +88,23 @@ uv run python scripts/build_monitoring_dashboard.py
 | `auc_roc`, `recall_default`, `ks_score` | float | **Só quando os rótulos chegam** |
 | `alerts_warning`, `alerts_critical` | contagem | Imediatamente |
 
+### Contrato de integração com a Etapa 2
+
+A Etapa 2 deve fornecer ao tracking, por lote, métricas agregadas com estes nomes:
+
+| Sinal | Chaves MLflow | Interpretação |
+|---|---|---|
+| PSI por feature | `psi_<FEATURE>` | Magnitude do drift; thresholds 0,10/0,25 |
+| Estatística D do KS | `ks_d_<FEATURE>` | Confirmação, não usada isoladamente para severidade |
+| PSI do score | `psi_score` | Drift de predição |
+| Número/fração de features com drift | `n_features_drifted`, `share_features_drifted` | Thresholds da fração: 0,20 atenção; 0,50 crítico |
+| Métricas com rótulos | `auc_roc`, `recall_default` | Valores observados no lote rotulado |
+| Queda vs. baseline | `auc_drop`, `recall_drop` | Delta positivo `max(0, baseline - lote)`; AUC 0,03/0,05 e recall 0,05/0,10 para atenção/crítico |
+
+O estágio de performance deve ser omitido quando os rótulos ainda não estiverem
+ disponíveis. Relatórios e métricas enviados ao MLflow devem ser agregados; nunca anexar
+DataFrames ou registros individuais.
+
 > ℹ️ Em crédito, o rótulo (inadimplência) chega meses depois da decisão. As métricas de
 > drift são o **alarme antecipado**; as de performance são a **confirmação**. Na
 > simulação, os rótulos de cada lote são revelados no próprio lote para encurtar o ciclo

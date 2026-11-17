@@ -41,8 +41,23 @@ def evaluate_alerts(
             alerts.append(
                 {"name": key, "severity": "warning", "action": "review_score_distribution"}
             )
-        if key == "auc_drop" and value >= rules["auc_drop_critical"]:
-            alerts.append({"name": key, "severity": "critical", "action": "review_performance"})
+        if key == "auc_drop":
+            if value >= rules["auc_drop_critical"]:
+                alerts.append({"name": key, "severity": "critical", "action": "review_performance"})
+            elif value >= rules["auc_drop_warning"]:
+                alerts.append({"name": key, "severity": "warning", "action": "review_performance"})
+        if key == "recall_drop":
+            if value >= rules["recall_drop_critical"]:
+                alerts.append(
+                    {"name": key, "severity": "critical", "action": "review_missed_defaults"}
+                )
+            elif value >= rules["recall_drop_warning"]:
+                alerts.append({"name": key, "severity": "warning", "action": "review_recall_trend"})
+        if key == "share_features_drifted":
+            if value >= rules["drifted_share_critical"]:
+                alerts.append({"name": key, "severity": "critical", "action": "investigate_drift"})
+            elif value >= rules["drifted_share_warning"]:
+                alerts.append({"name": key, "severity": "warning", "action": "monitor_trend"})
     return alerts
 
 
