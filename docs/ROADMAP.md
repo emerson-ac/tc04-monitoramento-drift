@@ -12,7 +12,7 @@
 | [0 — Fundação](#-etapa-0--fundação-do-repositório) | — | — | ✅ Concluída |
 | [1 — Validação de Dados](#-etapa-1--validação-de-dados-e-contratos) | Validação de Dados e Bibliotecas de Qualidade | 25% | ✅ Concluída |
 | [2 — Drift](#-etapa-2--simulação-e-detecção-de-drift) | Data Drift | 25% | ⬜ Não iniciada |
-| [3 — Observabilidade](#-etapa-3--observabilidade-de-pipelines-e-modelos) | Monitoramento de Pipelines e Infraestrutura | 20% | ⬜ Não iniciada |
+| [3 — Observabilidade](#-etapa-3--observabilidade-de-pipelines-e-modelos) | Monitoramento de Pipelines e Infraestrutura | 20% | 🟡 Em andamento |
 | [4 — Governança e Entrega](#%EF%B8%8F-etapa-4--governança-causalidade-e-entrega) | Privacy by Design e by Default | 15% + 15% (vídeo) | ⬜ Não iniciada |
 
 **Legenda:** ⬜ não iniciada · 🟡 em andamento · ✅ concluída · 🔴 bloqueada
@@ -40,7 +40,7 @@ Conferência item a item do que o enunciado exige. **Atualizar ao fechar cada et
 | Scikit-Learn / XGBoost | Modelo base de risco de crédito | ✅ Dummy · LogReg · XGBoost (promovido) |
 | Great Expectations **ou** Pandera | Data contracts | ✅ Pandera — [`src/contracts/`](../src/contracts/) |
 | Evidently AI (ou Alibi Detect) | Data/Concept Drift + relatórios | ⬜ Etapa 2 |
-| Prometheus-client | Opcional (integração com a Fase 3) | ⚪ Avaliar na Etapa 3 |
+| Prometheus-client | Opcional (integração com a Fase 3) | ✅ Pushgateway + Grafana da Fase 3 — [MONITORING.md](MONITORING.md#-grafana-e-prometheus-opcional) |
 
 ### Boas práticas obrigatórias
 
@@ -182,13 +182,16 @@ Relatório de drift (HTML do Evidently) apontando claramente as variáveis degra
 
 ### Tarefas
 
-- [ ] Logs estruturados (JSON) de cada estágio: ingestão, validação, predição, drift
-- [ ] Centralizar logs em `logs/pipeline.jsonl` e anexá-los às execuções do MLflow
-- [ ] Registrar uma execução MLflow por lote com as métricas de [MONITORING.md](MONITORING.md)
-- [ ] Regras de alerta (atenção / crítico) avaliadas a cada lote
-- [ ] Dashboard consolidado em `reports/monitoring/dashboard.html`
-- [ ] Documentar as métricas de saúde escolhidas e o playbook de resposta
-- [ ] ⚪ Opcional: expor métricas com `prometheus-client` e reaproveitar o Grafana da Fase 3
+- [x] Logs estruturados (JSON) centralizados em `logs/pipeline.jsonl`: todo evento de todo script, pelo próprio structlog
+- [x] Eventos de cada lote anexados à execução do MLflow (`logs/pipeline.jsonl` nos artefatos)
+- [x] Uma execução MLflow por lote — aprovado, bloqueado ou com falha — com as métricas de pipeline e infraestrutura de [MONITORING.md](MONITORING.md)
+- [x] Regras de alerta (atenção / crítico) avaliadas a cada lote: bloqueio, falha de estágio, volume, PSI, PSI do score, queda de AUC
+- [x] Gerador do dashboard consolidado (`reports/monitoring/dashboard.html`): status e latência por estágio, volume, memória, alertas
+- [x] Documentar as métricas de saúde escolhidas e o playbook de resposta
+- [ ] Estágios de predição, drift e performance no fluxo monitorado (dependem da Etapa 2)
+- [x] Dashboard versionado com os lotes de demonstração do contrato (dataset real)
+- [ ] Regenerar o dashboard e tirar os prints do MLflow com os lotes M01…M06
+- [x] ⚪ Opcional: métricas do lote enviadas ao Pushgateway (`TC04_PUSHGATEWAY_URL`) e dashboard do Grafana versionado em `monitoring/grafana/`
 
 ### 📦 Entregável
 
@@ -246,4 +249,4 @@ Documentação completa de Governança e Causalidade no README + link do vídeo.
 
 ---
 
-**Última atualização:** 2026-11-10
+**Última atualização:** 2026-11-16

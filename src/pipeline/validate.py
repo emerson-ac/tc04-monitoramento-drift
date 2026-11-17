@@ -7,7 +7,7 @@ filtrar em silencio esconderia a falha de origem e distorceria a deteccao de dri
 """
 
 import time
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -33,6 +33,25 @@ class DemoBatch(StrEnum):
 
     VALID = "valid"
     CORRUPTED = "corrupted"
+
+
+@dataclass(frozen=True)
+class IngestedBatch:
+    """Lote lido na ingestao, com o que a validacao precisa para julga-lo.
+
+    Attributes:
+        batch_id: Identificador do lote.
+        batch: Linhas do lote.
+        source: ``real`` ou ``synthetic``.
+        expected_rows: Volume esperado (aviso W2 e alerta de volume).
+        reference: Referencia de treino, usada no aviso W3.
+    """
+
+    batch_id: str
+    batch: pd.DataFrame
+    source: str
+    expected_rows: int
+    reference: pd.DataFrame
 
 
 def validate_stage(
@@ -75,21 +94,20 @@ def validate_stage(
     return result
 
 
-def validate_demo_batch(
+def ingest_demo_batch(
     kind: DemoBatch,
     reference_dir: Path = REFERENCE_DIR,
     production_dir: Path = PRODUCTION_DIR,
-    quarantine_dir: Path = QUARANTINE_DIR,
-    report_dir: Path = VALIDATION_REPORT_DIR,
-) -> ContractResult:
-    """Demonstracao do contrato: um lote valido passa; o corrompido e bloqueado.
+) -> IngestedBatch:
+    """Estagio de ingestao da demonstracao: amostra do pool de producao com a seed global.
 
-    Ambos partem de uma amostra do pool de producao com a seed global.
+    O lote corrompido e a mesma amostra com os defeitos declarados em
+    ``batches.corrupted``: ele chega pela ingestao e e barrado no contrato.
 
     Raises:
         FileNotFoundError: Se os dados nao tiverem sido preparados.
-        ContractViolationError: No lote corrompido (comportamento esperado).
     """
+    started = time.perf_counter()
     config = load_config()
     pool = read_prepared(production_dir / "pool.parquet")
     reference = read_prepared(reference_dir / "train.parquet")
@@ -99,8 +117,41 @@ def validate_demo_batch(
     batch = pool.sample(n=rows, random_state=config["seed"])
     if kind is DemoBatch.CORRUPTED:
         batch = corrupt_batch(batch, batches["corrupted"])
+    logger.info(
+        "stage_ingestion",
+        stage="ingestion",
+        status="success",
+        batch_id=f"demo_{kind}",
+        rows_in=len(batch),
+        rows_out=len(batch),
+        duration_s=round(time.perf_counter() - started, 3),
+        source=source,
+    )
+    return IngestedBatch(f"demo_{kind}", batch, source, rows, reference)
+
+
+def validate_demo_batch(
+    kind: DemoBatch,
+    reference_dir: Path = REFERENCE_DIR,
+    production_dir: Path = PRODUCTION_DIR,
+    quarantine_dir: Path = QUARANTINE_DIR,
+    report_dir: Path = VALIDATION_REPORT_DIR,
+) -> ContractResult:
+    """Demonstracao do contrato: um lote valido passa; o corrompido e bloqueado.
+
+    Raises:
+        FileNotFoundError: Se os dados nao tiverem sido preparados.
+        ContractViolationError: No lote corrompido (comportamento esperado).
+    """
+    ingested = ingest_demo_batch(kind, reference_dir, production_dir)
     return validate_stage(
-        batch, f"demo_{kind}", source, rows, reference, quarantine_dir, report_dir
+        ingested.batch,
+        ingested.batch_id,
+        ingested.source,
+        ingested.expected_rows,
+        ingested.reference,
+        quarantine_dir,
+        report_dir,
     )
 
 

@@ -37,7 +37,7 @@ entregável é a camada de **sustentação** em torno dele:
 
 - **Etapa 1 — Validação de dados:** contrato com Pandera que intercepta e bloqueia lotes inválidos
 - **Etapa 2 — Drift:** lotes mensais simulados + Evidently AI com PSI e Kolmogorov-Smirnov
-- **Etapa 3 — Observabilidade:** logs estruturados, métricas do pipeline e alertas de drift no MLflow + dashboard
+- **Etapa 3 — Observabilidade:** logs centralizados, métricas por estágio, alertas, uma execução MLflow por lote e dashboard HTML; predição, drift e performance entram com a Etapa 2
 - **Etapa 4 — Governança:** plano LGPD, mitigação de vieses e análise causal (neste README)
 
 > O andamento de cada item está em [docs/ROADMAP.md](docs/ROADMAP.md).
@@ -97,7 +97,7 @@ atribuível à simulação.
 | Drift | **Evidently AI** | PSI, KS, relatórios HTML | ✅ Requerida |
 | Rastreamento | MLflow | Métricas de saúde por execução e por lote | ✅ Sugerida na Etapa 3 |
 | Logs | structlog (JSON) | Logs centralizados do pipeline | ✅ Etapa 3 |
-| Métricas (opcional) | prometheus-client | Integração com a stack da Fase 3 | ⚪ Opcional |
+| Métricas (opcional) | prometheus-client + Pushgateway + Grafana | Painel ao vivo no ambiente da Fase 3 ([Ambiente Publicado](#-ambiente-publicado-opcional)) | ⚪ Opcional |
 | Ambiente | uv + `pyproject.toml` | Versões travadas em `uv.lock` | — |
 | Qualidade | ruff + pytest + GitHub Actions | Lint, testes e execução do pipeline no CI | — |
 | Padrão de commits | Commitlint + Husky | Histórico semântico | ✅ Requerido |
@@ -109,7 +109,7 @@ atribuível à simulação.
 ```
 tc04-monitoramento-drift/
 ├── configs/
-│   ├── pipeline.yaml           # ✅ Seed, dataset, limpeza e split (limiares nas próximas etapas)
+│   ├── pipeline.yaml           # ✅ Seed, dataset, limpeza, split, contrato e limiares de alerta
 │   └── drift_scenarios.yaml    # ⬜ Perturbações de cada lote simulado (Etapa 2)
 ├── data/                       # Não versionado — gerado pelos scripts
 │   ├── raw/                    #   dataset original (e o sintético, se gerado)
@@ -118,18 +118,23 @@ tc04-monitoramento-drift/
 │   └── quarantine/             #   lotes rejeitados pelo contrato
 ├── docs/                       # ✅ Documentação do projeto
 ├── models/                     # Não versionado — artefato do modelo baseline
+├── monitoring/
+│   ├── grafana/                # ✅ Dashboard do Grafana (JSON) — camada opcional
+│   └── helm/                   # ✅ Values do MLflow compartilhado — camada opcional
 ├── notebooks/                  # ✅ 01_eda · ⬜ baseline e análise de drift
 ├── reports/                    # ✅ VERSIONADO — evidências (só agregados; nada do sintético)
 │   ├── model/                  # ✅ comparação dos candidatos (model_comparison.json)
 │   ├── validation/             #   resultado dos contratos por lote
 │   ├── drift/                  #   relatórios Evidently por lote
-│   └── monitoring/             #   dashboard consolidado
+│   └── monitoring/             # ✅ dashboard consolidado (dashboard.html)
 ├── scripts/
 │   ├── download_data.py        # ✅ Dataset real (SHA256) ou sintético
 │   ├── prepare_data.py         # ✅ Limpeza e split referência × produção
 │   ├── train_model.py          # ✅ Treina, compara e promove o modelo (ADR 04)
 │   ├── audit_model.py          # ✅ Ablação de AGE/EDUCATION e auditoria de viés (ADR 13)
 │   ├── validate_batch.py       # ✅ Demonstra o contrato: lote válido passa, corrompido é bloqueado
+│   ├── run_monitoring_demo.py  # ✅ Lote monitorado: estágios, alertas e execução no MLflow
+│   ├── build_monitoring_dashboard.py  # ✅ Regenera o dashboard HTML a partir do MLflow
 │   └── verify_setup.py         # ✅ Diz se o ambiente está pronto e o que falta
 ├── src/
 │   ├── config.py               # ✅ Caminhos, seed e configuração
@@ -137,10 +142,11 @@ tc04-monitoramento-drift/
 │   ├── contracts/              # ✅ Contrato Pandera (C1–C8), avisos e lote corrompido
 │   ├── models/                 # ✅ Candidatos, métricas, promoção, ablação e auditoria de viés
 │   ├── drift/                  # ⬜ Simulação e detecção (Etapa 2)
-│   ├── monitoring/             # ✅ Logging (structlog) · ⬜ métricas e alertas (Etapa 3)
-│   └── pipeline/               # ✅ Preparo, validação e treino · ⬜ demais estágios
+│   ├── monitoring/             # ✅ Logging · estágios · alertas · MLflow · dashboard · Pushgateway
+│   └── pipeline/               # ✅ Preparo, validação, treino e lote monitorado · ⬜ demais estágios
 ├── tests/                      # ✅ pytest, sem dependência de rede
-└── .github/workflows/          # ✅ CI: lint → testes · dataset real · commitlint
+└── .github/workflows/          # ✅ CI: lint → testes (contrato + monitoramento) · dataset real · commitlint
+                                #    + publicação opcional no ambiente compartilhado
 ```
 
 **Legenda:** ✅ existe · ⬜ a construir na etapa indicada
@@ -258,7 +264,31 @@ contrato coleta **todas** as violações de uma vez, move o lote inteiro para
 Relatório: [`reports/validation/demo_corrupted.json`](reports/validation/demo_corrupted.json).
 As 8 regras críticas e os 4 avisos estão em [docs/DATA_CONTRACTS.md](docs/DATA_CONTRACTS.md).
 
-### 5. Modelo base
+### 5. Monitoramento por lote (Etapa 3)
+
+Cada lote roda pelos estágios do pipeline com latência, volume e status medidos; os alertas
+são avaliados e a execução é registrada no MLflow local — inclusive a do lote bloqueado.
+
+```bash
+uv run python scripts/run_monitoring_demo.py --demo valid       # exit 0
+uv run python scripts/run_monitoring_demo.py --demo corrupted   # exit 2: bloqueado pelo contrato
+uv run python scripts/build_monitoring_dashboard.py             # regenera o dashboard
+uv run mlflow ui                                                # execuções em http://127.0.0.1:5000
+```
+
+| Evidência | Onde |
+|-----------|------|
+| Dashboard consolidado (abre no navegador, sem subir serviço) | `reports/monitoring/dashboard.html` |
+| Execuções, métricas e artefatos por lote | MLflow local (`mlflow.db`, não versionado) |
+| Log centralizado de todos os estágios | `logs/pipeline.jsonl` (não versionado; anexado a cada execução) |
+
+Métricas, alertas e playbook: [docs/MONITORING.md](docs/MONITORING.md). Os estágios de
+predição, drift e performance entram no mesmo fluxo com a Etapa 2.
+
+> 📡 **Opcional — Grafana ao vivo.** Os mesmos lotes podem ser acompanhados no Grafana do
+> laboratório: ver [Ambiente Publicado](#-ambiente-publicado-opcional).
+
+### 6. Modelo base
 
 ```bash
 uv run python scripts/train_model.py
@@ -281,7 +311,7 @@ Leitura dos resultados e limitações no [Model Card](docs/MODEL_CARD.md).
 O modelo usa **só as 19 variáveis financeiras**: `AGE` e `EDUCATION` saíram pela ablação
 do passo 6.
 
-### 6. Ablação e auditoria de viés
+### 7. Ablação e auditoria de viés
 
 ```bash
 uv run python scripts/audit_model.py
@@ -294,7 +324,7 @@ uv run python scripts/audit_model.py
   aprovação e recall por grupo de sexo, idade, escolaridade e estado civil, no teste,
   com o modelo promovido. Leitura na [seção 6 de Governança](#6-mitigação-de-vieses).
 
-### 7. Testes e qualidade de código
+### 8. Testes e qualidade de código
 
 ```bash
 uv run pytest
@@ -315,6 +345,50 @@ validar mensagens de commit. Ver [docs/COMMITLINT.md](docs/COMMITLINT.md).
 
 ---
 
+## 🌐 Ambiente Publicado (opcional)
+
+O Prometheus e o Grafana da Fase 3
+([tc03-cloud-mlops](https://github.com/willmoreira7/tc03-cloud-mlops), cluster EKS do
+laboratório) são reaproveitados como painel ao vivo, e o mesmo cluster hospeda um MLflow
+compartilhado (`MLFLOW_TRACKING_URI`). O pipeline é batch, então cada lote
+**envia** suas métricas a um Pushgateway, que o Prometheus coleta e o Grafana exibe.
+
+```bash
+TC04_PUSHGATEWAY_URL=https://pushgateway.pocsarcotech.com uv run python scripts/run_monitoring_demo.py --demo valid
+TC04_PUSHGATEWAY_URL=https://pushgateway.pocsarcotech.com uv run python scripts/run_monitoring_demo.py --demo corrupted  # exit 2
+```
+
+| Serviço | URL | Login | Senha |
+|---------|-----|-------|-------|
+| Grafana — dashboard do TC04 | <https://grafana.pocsarcotech.com/d/tc04-batch-monitoring> | `admin` | `STbREguNJJg1lfor6j-Gk2jGeVNNip44` |
+| Prometheus | <https://prometheus.pocsarcotech.com> | — | — |
+| Pushgateway | <https://pushgateway.pocsarcotech.com> | — | — |
+| MLflow — execuções por lote | <https://mlflow.pocsarcotech.com> | `admin` | `53b9885d9f779717dc548b620b63a0d6` |
+
+- No Prometheus, as séries do projeto começam com `tc04_` (ex.: `tc04_batch_status`,
+  `tc04_stage_status`).
+- O dashboard do Grafana é versionado em
+  [`monitoring/grafana/tc04-batch-monitoring.json`](monitoring/grafana/tc04-batch-monitoring.json).
+- Para registrar os lotes no MLflow compartilhado em vez do `mlflow.db` local, ver
+  [docs/MONITORING.md](docs/MONITORING.md#-mlflow-compartilhado-opcional).
+- A cada merge na `main` (ou por disparo manual), o workflow
+  [`publish-monitoring.yml`](.github/workflows/publish-monitoring.yml) publica os lotes do
+  dataset real nesse ambiente. É separado do CI: ambiente fora do ar não bloqueia PR.
+  Configuração, gatilhos e leitura do resultado em
+  [docs/MONITORING.md](docs/MONITORING.md#-publicação-automática-workflow-opcional).
+
+> ⚠️ Credenciais publicadas intencionalmente: ambiente de laboratório acadêmico
+> (pós-graduação), como no TC03. É a única exceção à regra de não versionar credenciais
+> ([CONTRIBUTING](docs/CONTRIBUTING.md)); nenhum dado pessoal ou de produção passa por ele.
+
+> ℹ️ Este ambiente é **demonstração** e não substitui a evidência versionada. Sem as variáveis
+> `TC04_PUSHGATEWAY_URL` e `MLFLOW_TRACKING_URI` nada é enviado, e o avaliador vê tudo pelo MLflow local e por
+> `reports/monitoring/dashboard.html`. O Pushgateway está aberto, sem autenticação
+> (laboratório acadêmico); só métricas agregadas trafegam por ele. Detalhes em
+> [docs/MONITORING.md](docs/MONITORING.md#-grafana-e-prometheus-opcional).
+
+---
+
 ## 🗺️ Roadmap das Etapas
 
 | Etapa | Disciplina | Entregável | Status |
@@ -322,7 +396,7 @@ validar mensagens de commit. Ver [docs/COMMITLINT.md](docs/COMMITLINT.md).
 | **0** | — | Documentação, regras, ambiente, download do dataset e CI | ✅ Concluída |
 | **1** | Validação de Dados e Bibliotecas de Qualidade | Contrato Pandera + lote ruim bloqueado + modelo baseline | ✅ Concluída |
 | **2** | Data Drift | Lotes simulados + relatórios Evidently (PSI/KS) | ⬜ Não iniciada |
-| **3** | Monitoramento de Pipelines e Infraestrutura | Logs centralizados + MLflow + dashboard | ⬜ Não iniciada |
+| **3** | Monitoramento de Pipelines e Infraestrutura | Logs centralizados + MLflow + dashboard | 🟡 Em andamento |
 | **4** | Privacy by Design e by Default | Governança LGPD + análise causal + vídeo STAR | ⬜ Não iniciada |
 
 > 📄 Tarefas, critérios de aceite e conformidade item a item com o enunciado em
